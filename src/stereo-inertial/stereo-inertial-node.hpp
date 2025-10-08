@@ -4,6 +4,10 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/imu.hpp"
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <tf2/LinearMath/Transform.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_ros/transform_broadcaster.h>
 
 #include <cv_bridge/cv_bridge.h>
 
@@ -29,6 +33,12 @@ private:
     void GrabImageRight(const ImageMsg::SharedPtr msgRight);
     cv::Mat GetImage(const ImageMsg::SharedPtr msg);
     void SyncWithImu();
+    
+    // Pose publishing functions
+    tf2::Transform from_orb_to_ros_tf_transform(cv::Mat transformation_mat);
+    void publish_ros_pose_tf(cv::Mat Tcw, rclcpp::Time current_frame_time);
+    void publish_tf_transform(tf2::Transform tf_transform, rclcpp::Time current_frame_time);
+    void publish_pose_stamped(tf2::Transform tf_transform, rclcpp::Time current_frame_time);
 
     rclcpp::Subscription<ImuMsg>::SharedPtr   subImu_;
     rclcpp::Subscription<ImageMsg>::SharedPtr subImgLeft_;
@@ -51,6 +61,12 @@ private:
 
     bool bClahe_;
     cv::Ptr<cv::CLAHE> clahe_ = cv::createCLAHE(3.0, cv::Size(8, 8));
+    
+    // Pose publishing
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub;
+    std::string map_frame_id;
+    std::string pose_frame_id;
+    tf2::Matrix3x3 tf_orb_to_ros;
 };
 
 #endif

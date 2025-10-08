@@ -57,9 +57,19 @@ StereoInertialNode::StereoInertialNode(ORB_SLAM3::System *SLAM, const string &st
         cv::initUndistortRectifyMap(K_r, D_r, R_r, P_r.rowRange(0, 3).colRange(0, 3), cv::Size(cols_r, rows_r), CV_32F, M1r_, M2r_);
     }
 
-    subImu_ = this->create_subscription<ImuMsg>("imu", 1000, std::bind(&StereoInertialNode::GrabImu, this, _1));
+    // Create IMU subscription with BEST_EFFORT QoS to match camera publisher
+    rclcpp::QoS imu_qos(1000);
+    imu_qos.reliability(rclcpp::ReliabilityPolicy::BestEffort);
+    subImu_ = this->create_subscription<ImuMsg>("imu", imu_qos, std::bind(&StereoInertialNode::GrabImu, this, _1));
     subImgLeft_ = this->create_subscription<ImageMsg>("camera/left", 100, std::bind(&StereoInertialNode::GrabImageLeft, this, _1));
     subImgRight_ = this->create_subscription<ImageMsg>("camera/right", 100, std::bind(&StereoInertialNode::GrabImageRight, this, _1));
+
+    // Initialize pose publishing
+    map_frame_id = "map";
+    pose_frame_id = "odom";
+    // Transform: ORB Z→ROS X (forward), ORB X→ROS Y (right), ORB Y→ROS Z (up)
+    tf_orb_to_ros.setValue(0, 0, 1, -1, 0, 0, 0, -1, 0);
+    pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("~/camera_pose", 10);
 
     syncThread_ = new std::thread(&StereoInertialNode::SyncWithImu, this);
 }
@@ -207,10 +217,94 @@ void StereoInertialNode::SyncWithImu()
                 cv::remap(imRight, imRight, M1r_, M2r_, cv::INTER_LINEAR);
             }
 
-            SLAM_->TrackStereo(imLeft, imRight, tImLeft, vImuMeas);
+            // Try to get pose from TrackStereo return value like TrackMonocular
+            cv::Mat Tcw = ORB_SLAM3::Converter::toCvMat(SLAM_->TrackStereo(imLeft, imRight, tImLeft, vImuMeas).matrix());
+
+            // Publish camera pose only if SLAM is initialized and tracking
+            if (!Tcw.empty() && SLAM_->GetTrackingState() == ORB_SLAM3::Tracking::eTrackingState::OK)
+            {
+                rclcpp::Time current_frame_time = rclcpp::Time(static_cast<int64_t>(tImLeft * 1e9));
+                publish_ros_pose_tf(Tcw, current_frame_time);
+            }
 
             std::chrono::milliseconds tSleep(1);
             std::this_thread::sleep_for(tSleep);
         }
     }
+}
+
+tf2::Transform StereoInertialNode::from_orb_to_ros_tf_transform(cv::Mat transformation_mat)
+{
+    cv::Mat orb_rotation(3, 3, CV_32F);
+    cv::Mat orb_translation(3, 1, CV_32F);
+
+    orb_rotation = transformation_mat.rowRange(0, 3).colRange(0, 3);
+    orb_translation = transformation_mat.rowRange(0, 3).col(3);
+
+    tf2::Matrix3x3 tf_camera_rotation(
+        orb_rotation.at<float>(0, 0), orb_rotation.at<float>(0, 1),
+        orb_rotation.at<float>(0, 2), orb_rotation.at<float>(1, 0),
+        orb_rotation.at<float>(1, 1), orb_rotation.at<float>(1, 2),
+        orb_rotation.at<float>(2, 0), orb_rotation.at<float>(2, 1),
+        orb_rotation.at<float>(2, 2));
+
+    tf2::Vector3 tf_camera_translation(orb_translation.at<float>(0),
+                                      orb_translation.at<float>(1),
+                                      orb_translation.at<float>(2));
+
+    // Transform from orb coordinate system to ros coordinate system
+    const tf2::Matrix3x3 tf_orb_to_ros(tf_orb_to_ros);
+    tf2::Transform tf_orb_to_ros_transform(tf_orb_to_ros, tf2::Vector3(0, 0, 0));
+
+    return tf_orb_to_ros_transform * tf2::Transform(tf_camera_rotation, tf_camera_translation);
+}
+
+void StereoInertialNode::publish_ros_pose_tf(cv::Mat Tcw, rclcpp::Time current_frame_time)
+{
+    if (!Tcw.empty())
+    {
+        tf2::Transform tf_transform = from_orb_to_ros_tf_transform(Tcw);
+        publish_tf_transform(tf_transform, current_frame_time);
+        publish_pose_stamped(tf_transform, current_frame_time);
+    }
+}
+
+void StereoInertialNode::publish_tf_transform(tf2::Transform tf_transform, rclcpp::Time current_frame_time)
+{
+    static tf2_ros::TransformBroadcaster tf_broadcaster(this);
+
+    std_msgs::msg::Header header;
+    header.stamp = current_frame_time;
+    header.frame_id = map_frame_id;
+
+    geometry_msgs::msg::TransformStamped tf_msg;
+    tf_msg.header = header;
+    tf_msg.child_frame_id = pose_frame_id;
+
+    tf2::Vector3 translation = tf_transform.getOrigin();
+    tf_msg.transform.translation.x = translation.getX();
+    tf_msg.transform.translation.y = translation.getY();
+    tf_msg.transform.translation.z = translation.getZ();
+
+    tf2::Quaternion quat = tf_transform.getRotation();
+    tf_msg.transform.rotation.x = quat.getX();
+    tf_msg.transform.rotation.y = quat.getY();
+    tf_msg.transform.rotation.z = quat.getZ();
+    tf_msg.transform.rotation.w = quat.getW();
+
+    tf_broadcaster.sendTransform(tf_msg);
+}
+
+void StereoInertialNode::publish_pose_stamped(tf2::Transform tf_transform, rclcpp::Time current_frame_time)
+{
+    geometry_msgs::msg::PoseStamped pose_msg;
+    pose_msg.header.stamp = current_frame_time;
+    pose_msg.header.frame_id = pose_frame_id;
+    
+    // Convert tf2::Transform to geometry_msgs::Pose
+    geometry_msgs::msg::Pose pose;
+    tf2::toMsg(tf_transform, pose);
+    pose_msg.pose = pose;
+
+    pose_pub->publish(pose_msg);
 }

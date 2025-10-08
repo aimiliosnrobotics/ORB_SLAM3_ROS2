@@ -66,7 +66,14 @@ StereoSlamNode::~StereoSlamNode()
 
 void StereoSlamNode::GrabStereo(const ImageMsg::SharedPtr msgLeft, const ImageMsg::SharedPtr msgRight)
 {
+    // Safety check for SLAM system
+    if (!m_SLAM) {
+        RCLCPP_WARN(this->get_logger(), "SLAM system is null, skipping frame");
+        return;
+    }
+
     // Copy the ros rgb image message to cv::Mat.
+    cv_bridge::CvImageConstPtr cv_ptrLeft;
     try
     {
         cv_ptrLeft = cv_bridge::toCvShare(msgLeft);
@@ -78,6 +85,7 @@ void StereoSlamNode::GrabStereo(const ImageMsg::SharedPtr msgLeft, const ImageMs
     }
 
     // Copy the ros depth image message to cv::Mat.
+    cv_bridge::CvImageConstPtr cv_ptrRight;
     try
     {
         cv_ptrRight = cv_bridge::toCvShare(msgRight);
@@ -88,14 +96,25 @@ void StereoSlamNode::GrabStereo(const ImageMsg::SharedPtr msgLeft, const ImageMs
         return;
     }
 
-    if (doRectify){
-        cv::Mat imLeft, imRight;
-        cv::remap(cv_ptrLeft->image,imLeft,M1l,M2l,cv::INTER_LINEAR);
-        cv::remap(cv_ptrRight->image,imRight,M1r,M2r,cv::INTER_LINEAR);
-        m_SLAM->TrackStereo(imLeft, imRight, Utility::StampToSec(msgLeft->header.stamp));
-    }
-    else
+    // Safety check for valid images
+    if (!cv_ptrLeft || !cv_ptrRight || cv_ptrLeft->image.empty() || cv_ptrRight->image.empty())
     {
-        m_SLAM->TrackStereo(cv_ptrLeft->image, cv_ptrRight->image, Utility::StampToSec(msgLeft->header.stamp));
+        RCLCPP_WARN(this->get_logger(), "Received empty or invalid stereo images");
+        return;
+    }
+
+    try {
+        if (doRectify){
+            cv::Mat imLeft, imRight;
+            cv::remap(cv_ptrLeft->image,imLeft,M1l,M2l,cv::INTER_LINEAR);
+            cv::remap(cv_ptrRight->image,imRight,M1r,M2r,cv::INTER_LINEAR);
+            m_SLAM->TrackStereo(imLeft, imRight, Utility::StampToSec(msgLeft->header.stamp));
+        }
+        else
+        {
+            m_SLAM->TrackStereo(cv_ptrLeft->image, cv_ptrRight->image, Utility::StampToSec(msgLeft->header.stamp));
+        }
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR(this->get_logger(), "Error in TrackStereo: %s", e.what());
     }
 }

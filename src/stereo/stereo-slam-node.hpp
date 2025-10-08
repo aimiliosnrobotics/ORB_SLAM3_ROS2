@@ -35,9 +35,6 @@ private:
     bool doRectify;
     cv::Mat M1l,M2l,M1r,M2r;
 
-    cv_bridge::CvImageConstPtr cv_ptrLeft;
-    cv_bridge::CvImageConstPtr cv_ptrRight;
-
     std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image> > left_sub;
     std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image> > right_sub;
 

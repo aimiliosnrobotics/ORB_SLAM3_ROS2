@@ -24,6 +24,9 @@ int main(int argc, char **argv)
     bool visualization = true;
     ORB_SLAM3::System SLAM(argv[1], argv[2], ORB_SLAM3::System::IMU_MONOCULAR, visualization);
 
+    // Set verbosity level for debug output
+    ORB_SLAM3::Verbose::SetTh(ORB_SLAM3::Verbose::VERBOSITY_NORMAL);
+
     auto node = std::make_shared<MonoInetrialNode>(&SLAM);
     std::cout << "============================ " << std::endl;\
 

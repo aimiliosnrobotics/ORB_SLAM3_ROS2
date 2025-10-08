@@ -36,6 +36,7 @@ MonocularSlamNode::MonocularSlamNode(ORB_SLAM3::System* pSLAM)
         "/camera/image_raw",
         qos,
         std::bind(&MonocularSlamNode::GrabImage, this, std::placeholders::_1));
+    
     std::cout << "slam changed" << std::endl;
 }
 

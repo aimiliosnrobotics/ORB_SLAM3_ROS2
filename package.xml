@@ -16,6 +16,10 @@
   <depend>message_filters</depend>
   <depend>Pangolin</depend>
   
+  <!-- Python dependencies for IMU frame corrector -->
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
+  
   <export>
     <build_type>ament_cmake</build_type>
   </export>

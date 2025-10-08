@@ -19,6 +19,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2 REQUIRED)
@@ -45,7 +46,7 @@ add_executable(mono
   src/monocular/mono.cpp
   src/monocular/monocular-slam-node.cpp
 )
-ament_target_dependencies(mono rclcpp sensor_msgs cv_bridge ORB_SLAM3 Pangolin OpenCV)
+ament_target_dependencies(mono rclcpp sensor_msgs geometry_msgs tf2_ros tf2 tf2_geometry_msgs cv_bridge ORB_SLAM3 Pangolin OpenCV)
 
 add_executable(mono-pcloud
   src/mono-pcloud/mono-pcloud.cpp
@@ -57,7 +58,7 @@ add_executable(mono-inetrial
   src/monocular-inetrial/mono-inetrial.cpp
   src/monocular-inetrial/mono-inetrial-node.cpp
 )
-ament_target_dependencies(mono-inetrial rclcpp sensor_msgs cv_bridge ORB_SLAM3 Pangolin OpenCV)
+ament_target_dependencies(mono-inetrial rclcpp sensor_msgs geometry_msgs tf2_ros tf2 tf2_geometry_msgs cv_bridge ORB_SLAM3 Pangolin OpenCV)
 
 add_executable(mono-stream
   src/monocular-stream/mono-stream.cpp
@@ -87,9 +88,15 @@ add_executable(stereo-inertial
   src/stereo-inertial/stereo-inertial.cpp
   src/stereo-inertial/stereo-inertial-node.cpp
 )
-ament_target_dependencies(stereo-inertial rclcpp sensor_msgs cv_bridge ORB_SLAM3 Pangolin OpenCV)
+ament_target_dependencies(stereo-inertial rclcpp sensor_msgs geometry_msgs tf2_ros tf2 tf2_geometry_msgs cv_bridge message_filters ORB_SLAM3 Pangolin OpenCV)
 
 install(TARGETS mono mono-pcloud mono-inetrial mono-stream image-stream rgbd stereo stereo-inertial DESTINATION lib/${PROJECT_NAME})
+
+# Install Python scripts
+install(PROGRAMS
+  src/imu_frame_corrector.py
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 ament_package()
 
