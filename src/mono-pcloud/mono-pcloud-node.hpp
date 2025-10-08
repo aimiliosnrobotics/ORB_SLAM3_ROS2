@@ -9,11 +9,11 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
 #include <tf2/LinearMath/Transform.h>
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <tf2_geometry_msgs.hpp>
 
 #include <image_transport/image_transport.hpp>
 
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge.hpp>
 
 #include "System.h"
 #include "Frame.h"
