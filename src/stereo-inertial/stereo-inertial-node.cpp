@@ -65,11 +65,26 @@ StereoInertialNode::StereoInertialNode(ORB_SLAM3::System *SLAM, const string &st
     subImgRight_ = this->create_subscription<ImageMsg>("camera/right", 100, std::bind(&StereoInertialNode::GrabImageRight, this, _1));
 
     // Initialize pose publishing
-    map_frame_id = "map";
-    pose_frame_id = "odom";
-    // Transform: ORB Z→ROS X (forward), ORB X→ROS Y (right), ORB Y→ROS Z (up)
-    tf_orb_to_ros.setValue(0, 0, 1, -1, 0, 0, 0, -1, 0);
+    map_frame_id = "odom";
+    pose_frame_id = "camera_frame";
+    // Transform: ORB Z→ROS Y (forward), ORB X→ROS X (right), ORB Y→ROS -Z (up)
+    // tf_orb_to_ros.setValue(0, 1, 0, 1, 0, 0, 0, 0, 1);
+    tf_orb_to_ros.setValue(0, 0, 1, 0, 1, 0, -1, 0, 0);
     pose_pub = this->create_publisher<geometry_msgs::msg::PoseStamped>("~/camera_pose", 10);
+    odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("odom", 10);
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(this);
+    
+    // Initialize pose accumulation variables
+    has_prev_pose_ = false;
+    accumulated_pose_ = Sophus::SE3f(); // Identity pose
+    
+    // Initialize orientation reset variables
+    initial_orientation_set_ = false;
+    
+    // Static orientation correction to make camera point forward
+    // This corrects the orientation so the camera points forward instead of down
+    // 90-degree rotation around X-axis to correct the orientation
+    orientation_correction_ = tf2::Quaternion(tf2::Vector3(1, 0, 0), M_PI/2);
 
     syncThread_ = new std::thread(&StereoInertialNode::SyncWithImu, this);
 }
@@ -217,14 +232,55 @@ void StereoInertialNode::SyncWithImu()
                 cv::remap(imRight, imRight, M1r_, M2r_, cv::INTER_LINEAR);
             }
 
-            // Try to get pose from TrackStereo return value like TrackMonocular
-            cv::Mat Tcw = ORB_SLAM3::Converter::toCvMat(SLAM_->TrackStereo(imLeft, imRight, tImLeft, vImuMeas).matrix());
+            // Get pose from TrackStereo - it returns Sophus::SE3f
+            Sophus::SE3f Tcw_SE3 = SLAM_->TrackStereo(imLeft, imRight, tImLeft, vImuMeas);
+            
+            // Check if pose is valid (not zero matrix)
+            if (Tcw_SE3.matrix().isZero(0)) {
+                RCLCPP_WARN(this->get_logger(), "Invalid pose from ORB-SLAM3");
+                continue;
+            }
 
-            // Publish camera pose only if SLAM is initialized and tracking
-            if (!Tcw.empty() && SLAM_->GetTrackingState() == ORB_SLAM3::Tracking::eTrackingState::OK)
+            // Only process if SLAM is tracking successfully
+            if (SLAM_->GetTrackingState() == ORB_SLAM3::Tracking::eTrackingState::OK)
             {
+                // Invert to get camera-in-world pose
+                Sophus::SE3f Twc = Tcw_SE3.inverse();
+
+                // Initialize previous pose if this is the first valid pose
+                if (!has_prev_pose_) {
+                    prev_pose_ = Twc;
+                    has_prev_pose_ = true;
+                    continue; // Skip first frame
+                }
+
+                // Compute delta between frames
+                Sophus::SE3f delta = prev_pose_.inverse() * Twc;
+                accumulated_pose_ = accumulated_pose_ * delta;
+                prev_pose_ = Twc;
+
+                // Extract translation and rotation from accumulated pose
+                Eigen::Vector3f t_slam = accumulated_pose_.translation();
+                Eigen::Matrix3f R_slam = accumulated_pose_.rotationMatrix();
+
+                // Axis conversion: ORB-SLAM3 → ROS
+                // ORB-SLAM3: X=right, Y=down, Z=forward
+                // ROS REP-103: X=forward, Y=left, Z=up
+                Eigen::Matrix3f R_slam_to_ros;
+                R_slam_to_ros << 0,  0, 1,
+                            -1,  0, 0,
+                            0,  -1, 0;
+
+                Eigen::Vector3f t_ros = R_slam_to_ros * t_slam;
+                Eigen::Matrix3f R_ros = R_slam_to_ros * R_slam * R_slam_to_ros.transpose();
+
+                // Convert to quaternion
+                Eigen::Quaternionf q_ros(R_ros);
+                q_ros.normalize();
+
+                // Publish odometry
                 rclcpp::Time current_frame_time = rclcpp::Time(static_cast<int64_t>(tImLeft * 1e9));
-                publish_ros_pose_tf(Tcw, current_frame_time);
+                publish_odometry(t_ros, q_ros, current_frame_time);
             }
 
             std::chrono::milliseconds tSleep(1);
@@ -307,4 +363,40 @@ void StereoInertialNode::publish_pose_stamped(tf2::Transform tf_transform, rclcp
     pose_msg.pose = pose;
 
     pose_pub->publish(pose_msg);
+}
+
+void StereoInertialNode::publish_odometry(const Eigen::Vector3f& translation, const Eigen::Quaternionf& rotation, rclcpp::Time current_frame_time)
+{
+    // Publish Odometry
+    nav_msgs::msg::Odometry odom_msg;
+    odom_msg.header.stamp = current_frame_time;
+    odom_msg.header.frame_id = "odom";
+    odom_msg.child_frame_id = "camera_frame";
+
+    odom_msg.pose.pose.position.x = translation.x();
+    odom_msg.pose.pose.position.y = translation.y();
+    odom_msg.pose.pose.position.z = translation.z();
+
+    odom_msg.pose.pose.orientation.x = rotation.x();
+    odom_msg.pose.pose.orientation.y = rotation.y();
+    odom_msg.pose.pose.orientation.z = rotation.z();
+    odom_msg.pose.pose.orientation.w = rotation.w();
+
+    odom_pub_->publish(odom_msg);
+
+    // Publish TF
+    geometry_msgs::msg::TransformStamped tf_msg;
+    tf_msg.header = odom_msg.header;
+    tf_msg.child_frame_id = odom_msg.child_frame_id;
+
+    tf_msg.transform.translation.x = translation.x();
+    tf_msg.transform.translation.y = translation.y();
+    tf_msg.transform.translation.z = translation.z();
+
+    tf_msg.transform.rotation.x = rotation.x();
+    tf_msg.transform.rotation.y = rotation.y();
+    tf_msg.transform.rotation.z = rotation.z();
+    tf_msg.transform.rotation.w = rotation.w();
+
+    tf_broadcaster_->sendTransform(tf_msg);
 }

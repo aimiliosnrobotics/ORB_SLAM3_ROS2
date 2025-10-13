@@ -20,6 +20,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(camera_info_manager REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2 REQUIRED)
@@ -110,7 +111,7 @@ add_executable(stereo-inertial
   src/stereo-inertial/stereo-inertial.cpp
   src/stereo-inertial/stereo-inertial-node.cpp
 )
-ament_target_dependencies(stereo-inertial rclcpp sensor_msgs geometry_msgs tf2_ros tf2 tf2_geometry_msgs cv_bridge message_filters Pangolin OpenCV)
+ament_target_dependencies(stereo-inertial rclcpp sensor_msgs geometry_msgs nav_msgs tf2_ros tf2 tf2_geometry_msgs cv_bridge message_filters Pangolin OpenCV)
 target_link_libraries(stereo-inertial ${ORB_SLAM3_LIBRARY} ${DBoW2_LIBRARY} ${g2o_LIBRARY})
 
 install(TARGETS mono mono-pcloud mono-inetrial mono-stream image-stream rgbd stereo stereo-inertial DESTINATION lib/${PROJECT_NAME})
