@@ -43,6 +43,7 @@ set(g2o_INCLUDE_DIR "/home/ubuntu/ORB-SLAM3-STEREO-FIXED/Thirdparty/g2o")
 # Add explicit include paths for ROS2 headers and ORB_SLAM3 dependencies
 include_directories(
   include
+  ${ORB_SLAM3_ROOT_DIR}
   ${ORB_SLAM3_ROOT_DIR}/include
   ${ORB_SLAM3_ROOT_DIR}/include/CameraModels
   ${ORB_SLAM3_ROOT_DIR}/Thirdparty/Sophus
